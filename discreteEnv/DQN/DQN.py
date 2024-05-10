@@ -15,7 +15,7 @@ class DQNAgent:
         self.action_space = action_space
         self.optimizer = optimizers.Adam(learning_rate)
         self.model = self.create_model()
-        self.epsilon = 1.0
+        self.epsilon = 150.0
         self.min_epsilon = 0.01
         self.epsilon_decay = 0.995
 
@@ -78,7 +78,6 @@ class CoverageEnv(gym.Env):
 
     def step(self, action):
         prev_position = tuple(self.agent_position)
-
         if action == 0:
             self.agent_position[0] = max(self.agent_position[0] - 1, 0)
         elif action == 1:
@@ -89,9 +88,8 @@ class CoverageEnv(gym.Env):
             self.agent_position[1] = min(self.agent_position[1] + 1, self.grid_size[1] - 1)
 
         new_position = tuple(self.agent_position)
-        reward = 1 if self.grid[new_position] == 0 else -0.1
+        reward = 1 if self.grid[new_position] == 0 else -100
         self.grid[new_position] = 1
-
         done = np.all(self.grid == 1)
         if done:
             reward += 10
@@ -108,7 +106,7 @@ class CoverageEnv(gym.Env):
             pygame.quit()
             return
 
-        self.screen.fill((255, 255, 255))
+        self.screen.fill((255, 255, 255))  # White background
         for x in range(self.grid_size[0]):
             for y in range(self.grid_size[1]):
                 rect = pygame.Rect(y * self.cell_size, x * self.cell_size, self.cell_size, self.cell_size)
@@ -135,6 +133,7 @@ def train_dqn(episodes):
         done = False
         total_reward = 0
         while not done:
+            env.render()
             action = agent.choose_action(state)
             next_state, reward, done, _ = env.step(action)
             next_state = next_state.reshape(*state_shape)
@@ -149,5 +148,5 @@ def train_dqn(episodes):
                 print(f"Episode {episode + 1}: Total reward = {total_reward}, Epsilon = {agent.epsilon:.2f}")
                 break
 
-
-train_dqn(4)
+train_dqn(5)
+env.close()
