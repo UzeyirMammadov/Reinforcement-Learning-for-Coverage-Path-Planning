@@ -1,7 +1,7 @@
 import numpy as np
 
-from discreteEnv.Agent import QLearningAgent, train_agent
-from discreteEnv.DiscreteEnvironment import CoverageEnv
+from discreteEnv.playground.Agent import QLearningAgent, train_agent
+from discreteEnv.playground.DiscreteEnvironment import CoverageEnv
 
 
 def test_agent(env, agent, episodes=10):
