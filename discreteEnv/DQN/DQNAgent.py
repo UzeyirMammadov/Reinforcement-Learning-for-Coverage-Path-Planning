@@ -1,5 +1,5 @@
 import os
-from random import random
+import random
 
 import numpy as np
 import torch
@@ -7,7 +7,7 @@ from torch import optim
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
-from discreteEnv.DQN.DQN import DQN, agent
+from discreteEnv.DQN.DQN import DQN
 
 
 class DQNAgent:
@@ -49,8 +49,6 @@ class DQNAgent:
         target_f[0][action] = target
 
         self.optimizer.zero_grad()
-        average_q_value = torch.mean(target_f).item()
-        agent.writer.add_scalar('Average Q-value', average_q_value)
         loss = self.loss_fn(self.model(state), target_f)
         loss.backward()
         self.optimizer.step()
