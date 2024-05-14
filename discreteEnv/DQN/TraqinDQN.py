@@ -2,15 +2,20 @@ import os
 import time
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 from discreteEnv.DQN.CoverageEnv import CoverageEnv
 from discreteEnv.DQN.DQNAgent import DQNAgent
 from discreteEnv.DQN.ReplayBuffer import ReplayBuffer
 
+log_dir = os.path.join("logs", "dqn")
+writer = SummaryWriter(log_dir=log_dir)
+
 env = CoverageEnv(grid_size=(5, 5))
 state_shape = (1,) + env.observation_space.shape
-agent = DQNAgent(state_shape=state_shape, action_space=env.action_space.n)
-replay_buffer = ReplayBuffer(20000)
+agent = DQNAgent(state_shape=state_shape, action_space=env.action_space.n, writer=writer)
+replay_buffer = ReplayBuffer(10000)
+
 def save_checkpoint(state, filename="checkpoint.pth.tar"):
     torch.save(state, filename)
 
@@ -46,9 +51,10 @@ def train_dqn(episodes, start_episode=0):
             if done:
                 print(f"Episode {episode + 1}: Total reward = {total_reward}, Epsilon = {agent.epsilon:.2f}")
 
-            agent.writer.add_scalar('Epsilon', agent.epsilon, episode)
-            agent.writer.add_scalar('Total Reward', total_reward, episode)
-            agent.writer.add_scalar('Buffer Size', len(replay_buffer.buffer), episode)
+            writer.add_scalar('Total Reward', total_reward, episode)
+            writer.add_scalar('Epsilon', agent.epsilon, episode)
+            writer.add_scalar('Steps per Episode', steps, episode)
+            writer.add_scalar('Buffer Size', len(replay_buffer.buffer), episode)
 
         # Save checkpoint
         checkpoint = {
@@ -61,7 +67,6 @@ def train_dqn(episodes, start_episode=0):
 
     env.close()
 
-# Load checkpoint if exists
 start_episode = 0
 if os.path.exists("checkpoint.pth.tar"):
     checkpoint = load_checkpoint()
@@ -70,4 +75,5 @@ if os.path.exists("checkpoint.pth.tar"):
     start_episode = checkpoint['episode'] + 1
     agent.epsilon = checkpoint['epsilon']
 
-train_dqn(20, start_episode)
+print(f"Starting training from episode {start_episode}")
+train_dqn(1000, start_episode)
