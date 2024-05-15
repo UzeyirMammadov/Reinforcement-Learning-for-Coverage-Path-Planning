@@ -47,6 +47,11 @@ class CoverageEnv(gym.Env):
             pygame.quit()
             return
 
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+
         self.screen.fill((255, 255, 255))
         for x in range(self.grid_size[0]):
             for y in range(self.grid_size[1]):

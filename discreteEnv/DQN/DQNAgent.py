@@ -53,6 +53,3 @@ class DQNAgent:
         if self.writer:
             self.writer.add_scalar('Loss', loss.item(), global_step)
             self.writer.add_scalar('Average Q-value', average_q_value, global_step)
-
-        if done:
-            self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)

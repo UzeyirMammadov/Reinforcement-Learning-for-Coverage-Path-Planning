@@ -42,21 +42,18 @@ def train_dqn(episodes, start_episode=0):
             if len(replay_buffer.buffer) > 500:
                 batch = replay_buffer.sample(32)
                 for s, a, r, s_next, d in batch:
-                    agent.train(s, a, r, s_next, d)
-                    loss = agent.loss_fn(
-                        agent.model(torch.tensor(s, dtype=torch.float32).to(agent.device).unsqueeze(0)),
-                        agent.model(torch.tensor(s, dtype=torch.float32).to(agent.device).unsqueeze(0)))
-                    agent.writer.add_scalar('Loss', loss.item(), global_step)
+                    agent.train(s, a, r, s_next, d, global_step)
                     global_step += 1
             if done:
+                agent.epsilon = max(agent.min_epsilon, agent.epsilon * agent.epsilon_decay)
                 print(f"Episode {episode + 1}: Total reward = {total_reward}, Epsilon = {agent.epsilon:.2f}")
+                break
+        # Log metrics
+        writer.add_scalar('Total Reward', total_reward, episode)
+        writer.add_scalar('Epsilon', agent.epsilon, episode)
+        writer.add_scalar('Steps per Episode', steps, episode)
+        writer.add_scalar('Buffer Size', len(replay_buffer.buffer), episode)
 
-            writer.add_scalar('Total Reward', total_reward, episode)
-            writer.add_scalar('Epsilon', agent.epsilon, episode)
-            writer.add_scalar('Steps per Episode', steps, episode)
-            writer.add_scalar('Buffer Size', len(replay_buffer.buffer), episode)
-
-        # Save checkpoint
         checkpoint = {
             'episode': episode,
             'model_state_dict': agent.model.state_dict(),
