@@ -31,7 +31,6 @@ def train_dqn(episodes, start_episode=0):
         steps = 0
         while not done:
             env.render()
-            time.sleep(0.1)
             action = agent.choose_action(state)
             next_state, reward, done, _ = env.step(action)
             next_state = next_state.reshape(state_shape)
