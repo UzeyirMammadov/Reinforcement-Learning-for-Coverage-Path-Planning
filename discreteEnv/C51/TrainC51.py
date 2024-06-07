@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 
@@ -39,6 +41,23 @@ def train_c51(episodes, render=False):
                 print(f"Episode {episode + 1}: Total Reward = {episode_reward}, Steps = {step_count}, Epsilon = {agent.epsilon:.2f}")
                 break
 
+        checkpoint = {
+            'episode': episode,
+            'model_state_dict': agent.model.state_dict(),
+            'optimizer_state_dict': agent.optimizer.state_dict(),
+            'epsilon': agent.epsilon
+        }
+        save_checkpoint(checkpoint)
 
+
+start_episode = 0
+if os.path.exists("checkpoint.pth.tar"):
+    checkpoint = load_checkpoint()
+    agent.model.load_state_dict(checkpoint['model_state_dict'])
+    agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    start_episode = checkpoint['episode'] + 1
+    agent.epsilon = checkpoint['epsilon']
+
+print(f"Starting training from episode {start_episode}")
 train_c51(100, render=True)
 env.close()
