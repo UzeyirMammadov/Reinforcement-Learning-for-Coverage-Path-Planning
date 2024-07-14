@@ -92,6 +92,8 @@ class GridWorldEnv(gym.Env):
                 self.render_grid[tuple(self._agent_location)] += 1
 
             terminated = np.all(self.grid != 0)
+            # if terminated == True:
+            #     self.reward += 10
 
         truncated = self.step_count == self.max_steps
 
