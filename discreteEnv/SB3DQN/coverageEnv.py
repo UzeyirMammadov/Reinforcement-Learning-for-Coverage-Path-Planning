@@ -1,12 +1,13 @@
 import gymnasium
 import numpy as np
+import pygame
 from stable_baselines3 import DQN
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
-from stable_baselines3.common.noise import NormalActionNoise
-from torch.utils.tensorboard import SummaryWriter
+from stable_baselines3.common.evaluation import evaluate_policy
+
 
 class EvalCallback(BaseCallback):
     def __init__(self, eval_env, eval_freq, n_eval_episodes=5, verbose=0):
@@ -46,16 +47,14 @@ class HyperparameterLoggerCallback(BaseCallback):
     def _on_step(self) -> bool:
         return True
 
-hyperparams = {
-    'learning_rate': 0.001,
-    'buffer_size': 25000,
-    'exploration_initial_eps': 1.0,
-    'exploration_fraction': 0.2,
-    'exploration_final_eps': 0.2,
-    'target_update_interval': 5000,
-    'batch_size' : 64
 
+hyperparams = {
+    'learning_rate': 0.0002,
+    'buffer_size': 3000,
+    'target_update_interval': 5000,
+    'exploration_fraction': 0.3
 }
+
 
 class RewardLoggerCallback(BaseCallback):
     def __init__(self, verbose=0):
@@ -71,83 +70,114 @@ class RewardLoggerCallback(BaseCallback):
             self.episode_rewards.append(self.current_episode_reward)
             self.logger.record('rollout/ep_rew_mean', np.mean(self.episode_rewards))
             self.logger.record('episode/reward', self.current_episode_reward)
-            
+
             self.current_episode_reward = 0
             self.episode_count += 1
 
         return True
 
+
 class CoverageEnv(gymnasium.Env):
-    def __init__(self, grid_size=(5, 5), cell_size=50):
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
+
+    def __init__(self, grid_size=(5, 5), cell_size=50, render_mode=None):
         super(CoverageEnv, self).__init__()
-        self.action_space = gymnasium.spaces.Discrete(4)
-        self.observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(grid_size[0] * grid_size[1],), dtype=np.float32)
+        self.action_space = gymnasium.spaces.Discrete(5)
+        self.observation_space = gymnasium.spaces.Box(low=0, high=1, shape=(grid_size[0] * grid_size[1],),
+                                                      dtype=np.float32)
         self.grid_size = grid_size
         self.cell_size = cell_size
         self.grid = np.zeros(grid_size, dtype=np.float32)
         self.agent_position = [0, 0]
-        self.max_steps = 500
+        self.max_steps = 100
         self.current_step = 0
         self.last_episode_steps = None
+        self.window = None
+        self.clock = None
+        self.render_mode = render_mode
+
+        self._action_to_direction = {
+            0: np.array([1, 0]),  # right
+            1: np.array([0, 1]),  # up
+            2: np.array([-1, 0]),  # left
+            3: np.array([0, -1]),  # down
+            4: "Finished"  # stop
+        }
 
     def step(self, action):
         self.current_step += 1
         prev_position = tuple(self.agent_position.copy())
 
-        if action == 0:
-            self.agent_position[0] = max(self.agent_position[0] - 1, 0)
-        elif action == 1:
-            self.agent_position[0] = min(self.agent_position[0] + 1, self.grid_size[0] - 1)
-        elif action == 2:
-            self.agent_position[1] = max(self.agent_position[1] - 1, 0)
-        elif action == 3:
-            self.agent_position[1] = min(self.agent_position[1] + 1, self.grid_size[1] - 1)
+        if action == 4: 
+            terminated = True
+            truncated = self.current_step >= self.max_steps
+            return self._get_obs(), 0, terminated, truncated, {}
+
+        direction = self._action_to_direction[action]
+        self.agent_position = np.clip(self.agent_position + direction, 0, self.grid_size[0] - 1)
 
         new_position = tuple(self.agent_position)
-        reward = -0.1
 
-        if self.grid[new_position] == 0:
-            reward += 1.5
+        reward = 0
+        if new_position == prev_position:
+            reward = -1  
+        elif self.grid[new_position] == 0:
+            reward = 10 
             self.grid[new_position] = 1
-        elif self.grid[new_position] == 1:
-            reward -= 0.1
-
-        # coverage_percentage = np.sum(self.grid) / (self.grid_size[0] * self.grid_size[1])
-
-        # if coverage_percentage >= 0.25 and coverage_percentage < 0.30:
-        #     reward += 0.5 
-        # elif coverage_percentage >= 0.50 and coverage_percentage < 0.55:
-        #     reward += 0.7 
-        # elif coverage_percentage >= 0.90 and coverage_percentage < 1.0:
-        #     reward += 1
+        else:
+            reward = -1 
 
         if np.all(self.grid == 1):
-            reward += 10
-            # if self.last_episode_steps is None or self.current_step < self.last_episode_steps:
-            #     reward += 10 if self.last_episode_steps is not None else 0
-            #     self.last_episode_steps = self.current_step
+            reward += 20
             terminated = True
         else:
             terminated = False
 
         truncated = self.current_step >= self.max_steps
 
-        # print(self.agent_position)
-        # print(self.grid)
-
-        print(f"Step: {self.current_step}, Action: {action}, Position: {self.agent_position}, Reward: {reward}")
-
-
-        flattened_grid = self.grid.flatten()
-
-        return flattened_grid, reward, terminated, truncated, {}
+        return self._get_obs(), reward, terminated, truncated, {}
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.grid = np.zeros(self.grid_size, dtype=np.float32)
-        self.agent_position = [0, 0]
+        self.agent_position = np.array([0, 0])
         self.current_step = 0
-        return self.grid.flatten(), {}
+        return self._get_obs(), {}
+
+    def _get_obs(self):
+        return self.grid.flatten()
+
+    def render(self, mode='human'):
+        if self.window is None:
+            pygame.init()
+            self.window = pygame.display.set_mode(
+                (self.grid_size[1] * self.cell_size, self.grid_size[0] * self.cell_size))
+            self.clock = pygame.time.Clock()
+
+        self.window.fill((255, 255, 255))
+
+        for i in range(self.grid_size[0]):
+            for j in range(self.grid_size[1]):
+                color = (0, 0, 0) if self.grid[i, j] == 1 else (255, 255, 255)
+                pygame.draw.rect(self.window, color,
+                                 (j * self.cell_size, i * self.cell_size, self.cell_size, self.cell_size))
+                pygame.draw.rect(self.window, (200, 200, 200),
+                                 (j * self.cell_size, i * self.cell_size, self.cell_size, self.cell_size), 1)
+
+        pygame.draw.circle(self.window, (0, 0, 255), (int(self.agent_position[1] * self.cell_size + self.cell_size / 2),
+                                                      int(self.agent_position[
+                                                              0] * self.cell_size + self.cell_size / 2)),
+                           self.cell_size // 3)
+
+        pygame.display.flip()
+        self.clock.tick(5)
+
+    def close(self):
+        if self.window is not None:
+            pygame.quit()
+            self.window = None
+            self.clock = None
+
 
 env = CoverageEnv(grid_size=(5, 5))
 check_env(env, warn=True)
@@ -155,61 +185,27 @@ check_env(env, warn=True)
 env = Monitor(env)
 env = DummyVecEnv([lambda: env])
 
-model = DQN('MlpPolicy', env, verbose=1, tensorboard_log="./dqn_tensorboard/", 
-        learning_rate=hyperparams['learning_rate'],
-        buffer_size=hyperparams['buffer_size'],
-        exploration_initial_eps=hyperparams['exploration_initial_eps'],
-        exploration_fraction=hyperparams['exploration_fraction'],
-        exploration_final_eps=hyperparams['exploration_final_eps'],
-        target_update_interval=hyperparams['target_update_interval'],
-        batch_size=hyperparams['batch_size'])
+model = DQN('MlpPolicy', env, verbose=1, tensorboard_log="./dqn_tensorboard/",
+            learning_rate=hyperparams['learning_rate'],
+            buffer_size=hyperparams['buffer_size'],
+            target_update_interval=hyperparams['target_update_interval'],
+            exploration_fraction=hyperparams['exploration_fraction'])
 
 checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./logs/', name_prefix='dqn_model')
 reward_logger_callback = RewardLoggerCallback()
 hyperparameter_logger_callback = HyperparameterLoggerCallback(hyperparams)
 
-model.learn(total_timesteps=1000000, callback=[checkpoint_callback, reward_logger_callback, hyperparameter_logger_callback])
+model.learn(total_timesteps=1000000,
+            callback=[checkpoint_callback, reward_logger_callback, hyperparameter_logger_callback])
 
 model.save("dqn_final_model")
 
 env.close()
 
-eval_env = CoverageEnv(grid_size=(5, 5))
+eval_env = CoverageEnv(grid_size=(5, 5), render_mode='human')
 eval_env = DummyVecEnv([lambda: Monitor(eval_env)])
 
-eval_callback = EvalCallback(eval_env, eval_freq=10000)
-
-model = DQN.load("dqn_final_model")
-
-eval_writer = SummaryWriter(log_dir="./dqn_tensorboard/evaluation")
-
-obs = eval_env.reset()
-total_steps = 0 
-max_total_steps = 1000  
-episode_rewards = []
-current_episode_reward = 0
-
-for step in range(max_total_steps):
-    action, _states = model.predict(obs, deterministic=True)
-    result = eval_env.step(action)
-    if len(result) == 5:
-        obs, rewards, terminated, truncated, info = result
-    else:
-        obs, rewards, done, info = result
-        terminated = done
-        truncated = False
-
-    total_steps += 1
-    current_episode_reward += rewards
-    
-    if terminated or truncated:
-        print(f"Episode completed in {total_steps} steps with reward: {current_episode_reward}")
-        episode_rewards.append(current_episode_reward)
-        current_episode_reward = 0
-        obs = eval_env.reset()
-
-mean_eval_reward = np.mean(episode_rewards)
-eval_writer.add_scalar('evaluation/mean_reward', mean_eval_reward, total_steps)
-eval_writer.close()
+mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=10, render=True)
+print(f"Mean reward: {mean_reward} +/- {std_reward:.2f}")
 
 eval_env.close()

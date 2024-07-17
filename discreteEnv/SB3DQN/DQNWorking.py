@@ -29,7 +29,7 @@ class GridWorldEnv(gym.Env):
             1: np.array([0, 1]),
             2: np.array([-1, 0]),
             3: np.array([0, -1]),
-            4: "Finished"  # any string works
+            4: "Finished"
         }
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
@@ -74,26 +74,28 @@ class GridWorldEnv(gym.Env):
         self.step_count += 1
         direction = self._action_to_direction[action]
 
-        if isinstance(direction, str):  # Finished action
+        if isinstance(direction, str):
             terminated = True
         else:
             old_location = self._agent_location.copy()
             self._agent_location = np.clip(self._agent_location + direction, 0, self.size - 1)
 
             if np.array_equal(old_location, self._agent_location):
-                self.reward = -1  # penalty for trying to move out of bounds
+                self.reward = -1
                 self.render_grid[tuple(self._agent_location)] += 1
             elif self.grid[tuple(self._agent_location)] == 0:
-                self.reward = 10  # reward for covering new square
+                self.reward = 10
                 self.grid[tuple(self._agent_location)] = 1
                 self.render_grid[tuple(self._agent_location)] += 1
             else:
-                self.reward = -1  # penalty for revisiting square
+                self.reward = -1
                 self.render_grid[tuple(self._agent_location)] += 1
 
-            terminated = np.all(self.grid != 0)
-            # if terminated == True:
-            #     self.reward += 10
+            if np.all(self.grid == 1):
+                self.reward += 20
+                terminated = True
+            else:
+                terminated = False
 
         truncated = self.step_count == self.max_steps
 
@@ -169,18 +171,15 @@ class GridWorldEnv(gym.Env):
         if self.window is not None:
             pygame.display.quit()
             pygame.quit()
-# Create the environment
+
 env = GridWorldEnv()
 
-# Create the model
-model = DQN("MlpPolicy", env, verbose=1, learning_rate=0.0003)
+model = DQN("MlpPolicy", env, verbose=1,tensorboard_log="./dqn_tensorboard/", learning_rate=0.0003, target_update_interval=5000, buffer_size=2000, exploration_fraction=0.3)
 
-# Train the agent
 checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./logs/', name_prefix='dqn_model')
 total_timesteps = 1000000
 model.learn(total_timesteps=total_timesteps, callback=[checkpoint_callback])
 
-# Evaluate the trained agent
 eval_env = GridWorldEnv(render_mode="human")
 mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=10, render=True)
 print(f"Mean reward: {mean_reward:.2f} +/- {std_reward:.2f}")
