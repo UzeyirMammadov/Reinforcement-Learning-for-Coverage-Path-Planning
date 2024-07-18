@@ -14,9 +14,10 @@ from stable_baselines3.common.noise import NormalActionNoise
 class ContinuousPolygonCoverageEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
-    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=250, coverage_threshold=0.95,
+    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=300, coverage_threshold=0.90,
                  render_mode=None):
         super(ContinuousPolygonCoverageEnv, self).__init__()
+        # Field consists of 36 cells
         self.field_polygon = Polygon(field_points)
         self.bounding_box = Polygon(bounding_box_points)
         self.cell_size = cell_size
@@ -24,6 +25,7 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.current_step = 0
         self.coverage_threshold = coverage_threshold
         self.render_mode = render_mode
+        self.reward = 0 
 
         self.action_space = spaces.Box(low=np.array([-1, -1, -1]), high=np.array([1, 1, 1]), dtype=np.float32)
         self.observation_space = spaces.Box(low=0, high=1, shape=(3,), dtype=np.float32)
@@ -47,10 +49,16 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.tractor_img = pygame.image.load('continuousEnv/DDPG/tractor.png')
         self.tractor_img = pygame.transform.scale(self.tractor_img, (self.cell_size * 30, self.cell_size * 30))
 
+        self.coverage_20_flag = False
+        self.coverage_40_flag = False
+        self.coverage_60_flag = False
+        self.coverage_80_flag = False
+
     def _calculate_grid_size(self, bounding_box_points):
         x_coords, y_coords = zip(*bounding_box_points)
         width = int((max(x_coords) - min(x_coords)) / self.cell_size) + 1
         height = int((max(y_coords) - min(y_coords)) / self.cell_size) + 1
+        # Overall 121 cells
         return width, height
 
     def _get_grid_cell(self, position):
@@ -88,34 +96,50 @@ class ContinuousPolygonCoverageEnv(gym.Env):
             [np.cos(self.agent_angle) * throttle, np.sin(self.agent_angle) * throttle], dtype=np.float32)
         new_position = self._clamp_position_to_bounds(new_position)
 
-        reward = 0
-
         if self._is_inside_polygon(new_position):
             self.agent_position = new_position
 
             cell_x, cell_y = self._get_grid_cell(self.agent_position)
             if not self.visited_grid[cell_x, cell_y]:
-                reward = 5
+                self.reward = 10
                 self.visited_grid[cell_x, cell_y] = True
             else:
-                reward = -1
+                self.reward = -2
                 self.overlap_count += 1
         else:
             self.agent_position = new_position
-            reward = -1
+            self.reward = -1
 
         self.path.append(tuple(self.agent_position))
 
         coverage = self.calculate_coverage()
         if coverage >= self.coverage_threshold:
-            reward += 20
+            self.reward += 20
+            print("Threshold reached")
             terminated = True
         else:
             terminated = False
 
+        if coverage >= 0.2 and self.coverage_20_flag == False:
+            self.reward += 15
+            self.coverage_20_flag = True
+            print("20% coverage reached")
+        if coverage >= 0.4 and self.coverage_40_flag == False:
+            self.reward += 15
+            self.coverage_40_flag = True
+            print("40% coverage reached")
+        if coverage >= 0.60 and self.coverage_60_flag == False:
+            self.reward += 15
+            self.coverage_60_flag = True
+            print("60% coverage reached")
+        if coverage >= 0.80 and self.coverage_80_flag == False:
+            self.reward += 15
+            self.coverage_80_flag = True
+            print("80% coverage reached")
+
         truncated = self.current_step >= self.max_steps
 
-        return self._normalize_observation(), reward, terminated, truncated, {}
+        return self._normalize_observation(), self.reward, terminated, truncated, {}
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -125,6 +149,12 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.visited_grid = np.zeros((self.grid_width, self.grid_height), dtype=bool)
         self.path = [tuple(self.agent_position)]
         self.overlap_count = 0
+
+        self.coverage_20_flag = False
+        self.coverage_40_flag = False
+        self.coverage_60_flag = False
+        self.coverage_80_flag = False
+
         return self._normalize_observation(), {}
 
     def _get_observation(self):
@@ -134,7 +164,18 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         return self.field_polygon.contains(Point(point))
 
     def calculate_coverage(self):
-        return np.sum(self.visited_grid) / self.visited_grid.size
+        polygon_mask = np.zeros((self.grid_width, self.grid_height), dtype=bool)
+        for i in range(self.grid_width):
+            for j in range(self.grid_height):
+                cell_center = (i * self.cell_size + self.cell_size / 2, j * self.cell_size + self.cell_size / 2)
+                if self.field_polygon.contains(Point(cell_center)):
+                    polygon_mask[i, j] = True
+
+        total_cells_in_polygon = np.sum(polygon_mask)
+
+        visited_cells_in_polygon = np.sum(self.visited_grid & polygon_mask)
+
+        return visited_cells_in_polygon / total_cells_in_polygon
 
     def render(self):
         if self.render_mode is None:
@@ -189,12 +230,12 @@ if __name__ == '__main__':
     check_env(env, warn=True)
 
     n_actions = env.action_space.shape[-1]
-    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.5 * np.ones(n_actions))
+    action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.2 * np.ones(n_actions))
 
-    model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log="./continuousEnv/DDPG/ddpg_tensorboard/", action_noise=action_noise, learning_rate=0.0002)
+    model = DDPG("MlpPolicy", env, verbose=1, tensorboard_log="./continuousEnv/DDPG/ddpg_tensorboard/", action_noise=action_noise, learning_rate=0.001, buffer_size=30000)
 
     checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./continuousEnv/DDPG/logs/', name_prefix='ddpg_model')
-    total_timesteps = 1500000
+    total_timesteps = 1000000
     model.learn(total_timesteps=total_timesteps, callback=[checkpoint_callback])
 
     model.save("ddpg_final_model")

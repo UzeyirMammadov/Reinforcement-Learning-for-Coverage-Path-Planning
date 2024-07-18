@@ -13,7 +13,7 @@ from stable_baselines3.common.monitor import Monitor
 class ContinuousPolygonCoverageEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
-    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=500, coverage_threshold=0.95,
+    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=250, coverage_threshold=0.95,
                  render_mode=None):
         super(ContinuousPolygonCoverageEnv, self).__init__()
         self.field_polygon = Polygon(field_points)
@@ -42,6 +42,11 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.outside_color = (139, 69, 19)  # Saddle Brown
         self.path_color = (255, 0, 0)  # Red
         self.field_border_color = (0, 0, 0)  # Black
+
+        self.coverage_20_flag = False
+        self.coverage_40_flag = False
+        self.coverage_60_flag = False
+        self.coverage_80_flag = False
 
         self.tractor_img = pygame.image.load('/home/gast/Uzeyir/Reinforcement-Learning-for-Coverage-Path-Planning/continuousEnv/A2C/tractor.png')
         self.tractor_img = pygame.transform.scale(self.tractor_img, (self.cell_size * 30, self.cell_size * 30))
@@ -106,11 +111,28 @@ class ContinuousPolygonCoverageEnv(gym.Env):
 
         coverage = self.calculate_coverage()
         if coverage >= self.coverage_threshold:
-            reward += 20
-            print("Coverage threshold reached")
+            self.reward += 20
+            print("Threshold reached")
             terminated = True
         else:
             terminated = False
+
+        if coverage >= 0.2 and self.coverage_20_flag == False:
+            self.reward += 15
+            self.coverage_20_flag = True
+            print("20% coverage reached")
+        if coverage >= 0.4 and self.coverage_40_flag == False:
+            self.reward += 15
+            self.coverage_40_flag = True
+            print("40% coverage reached")
+        if coverage >= 0.60 and self.coverage_60_flag == False:
+            self.reward += 15
+            self.coverage_60_flag = True
+            print("60% coverage reached")
+        if coverage >= 0.80 and self.coverage_80_flag == False:
+            self.reward += 15
+            self.coverage_80_flag = True
+            print("80% coverage reached")
 
         truncated = self.current_step >= self.max_steps
 
@@ -125,6 +147,12 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.visited_grid = np.zeros((self.grid_width, self.grid_height), dtype=bool)
         self.path = [tuple(self.agent_position)]
         self.overlap_count = 0
+
+        self.coverage_20_flag = False
+        self.coverage_40_flag = False
+        self.coverage_60_flag = False
+        self.coverage_80_flag = False
+
         return self._normalize_observation(), {}
 
     def _get_observation(self):
@@ -136,42 +164,42 @@ class ContinuousPolygonCoverageEnv(gym.Env):
     def calculate_coverage(self):
         return np.sum(self.visited_grid) / self.visited_grid.size
 
-    # def render(self):
-    #     if self.render_mode is None:
-    #         return
+    def render(self):
+        if self.render_mode is None:
+            return
 
-    #     if self.screen is None:
-    #         pygame.init()
-    #         x_coords, y_coords = zip(*self.bounding_box.exterior.coords)
-    #         width = int((max(x_coords) - min(x_coords)) * self.cell_size * 50)
-    #         height = int((max(y_coords) - min(y_coords)) * self.cell_size * 50)
-    #         self.screen = pygame.display.set_mode((width, height))
-    #         pygame.display.set_caption('Polygon Coverage Env')
+        if self.screen is None:
+            pygame.init()
+            x_coords, y_coords = zip(*self.bounding_box.exterior.coords)
+            width = int((max(x_coords) - min(x_coords)) * self.cell_size * 50)
+            height = int((max(y_coords) - min(y_coords)) * self.cell_size * 50)
+            self.screen = pygame.display.set_mode((width, height))
+            pygame.display.set_caption('Polygon Coverage Env')
 
-    #     self.screen.fill(self.outside_color)
+        self.screen.fill(self.outside_color)
 
-    #     scaled_field_points = [(int(x * self.cell_size * 50), int(y * self.cell_size * 50)) for x, y in
-    #                            self.field_polygon.exterior.coords]
-    #     pygame.draw.polygon(self.screen, self.field_color, scaled_field_points, 0)
+        scaled_field_points = [(int(x * self.cell_size * 50), int(y * self.cell_size * 50)) for x, y in
+                               self.field_polygon.exterior.coords]
+        pygame.draw.polygon(self.screen, self.field_color, scaled_field_points, 0)
 
-    #     pygame.draw.polygon(self.screen, self.field_border_color, scaled_field_points, 1)
+        pygame.draw.polygon(self.screen, self.field_border_color, scaled_field_points, 1)
 
-    #     if len(self.path) > 1:
-    #         scaled_path_points = [(int(x * self.cell_size * 50), int(y * self.cell_size * 50)) for x, y in self.path]
-    #         pygame.draw.lines(self.screen, self.path_color, False, scaled_path_points, 2)
+        if len(self.path) > 1:
+            scaled_path_points = [(int(x * self.cell_size * 50), int(y * self.cell_size * 50)) for x, y in self.path]
+            pygame.draw.lines(self.screen, self.path_color, False, scaled_path_points, 2)
 
-    #     rotated_tractor = pygame.transform.rotate(self.tractor_img, -np.degrees(self.agent_angle))
-    #     rect = rotated_tractor.get_rect(center=(int(self.agent_position[0] * self.cell_size * 50 + self.cell_size * 25),
-    #                                             int(self.agent_position[
-    #                                                     1] * self.cell_size * 50 + self.cell_size * 25)))
-    #     self.screen.blit(rotated_tractor, rect.topleft)
+        rotated_tractor = pygame.transform.rotate(self.tractor_img, -np.degrees(self.agent_angle))
+        rect = rotated_tractor.get_rect(center=(int(self.agent_position[0] * self.cell_size * 50 + self.cell_size * 25),
+                                                int(self.agent_position[
+                                                        1] * self.cell_size * 50 + self.cell_size * 25)))
+        self.screen.blit(rotated_tractor, rect.topleft)
 
-    #     pygame.display.flip()
-    #     self.clock.tick(self.metadata["render_fps"])
+        pygame.display.flip()
+        self.clock.tick(self.metadata["render_fps"])
 
-    #     for event in pygame.event.get():
-    #         if event.type == pygame.QUIT:
-    #             self.close()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.close()
 
     def close(self):
         if self.screen is not None:
@@ -188,7 +216,7 @@ if __name__ == '__main__':
     env = Monitor(env)
     check_env(env, warn=True)
 
-    model = A2C("MlpPolicy", env, verbose=1, tensorboard_log="./continuousEnv/A2C/a2c_tensorboard/", gamma=0.5)
+    model = A2C("MlpPolicy", env, verbose=1, tensorboard_log="./continuousEnv/A2C/a2c_tensorboard/", learning_rate=0.0007)
 
     checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./continuousEnv/A2C/logs/', name_prefix='a2c_model')
     total_timesteps = 1000000
