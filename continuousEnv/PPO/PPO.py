@@ -13,7 +13,7 @@ from stable_baselines3.common.monitor import Monitor
 class ContinuousPolygonCoverageEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
-    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=250, coverage_threshold=0.90,
+    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=100, coverage_threshold=0.90,
                  render_mode=None):
         super(ContinuousPolygonCoverageEnv, self).__init__()
         self.field_polygon = Polygon(field_points)
@@ -23,6 +23,7 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.current_step = 0
         self.coverage_threshold = coverage_threshold
         self.render_mode = render_mode
+        self.reward = 0
 
         self.action_space = spaces.Box(low=np.array([-1, -1, -1]), high=np.array([1, 1, 1]), dtype=np.float32)
         self.observation_space = spaces.Box(low=0, high=1, shape=(3,), dtype=np.float32)
@@ -40,10 +41,15 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.field_color = (107, 142, 35)  # Olive Drab
         self.covered_color = (34, 139, 34)  # Forest Green
         self.outside_color = (139, 69, 19)  # Saddle Brown
-        self.path_color = (255, 0, 0)  # Red 
+        self.path_color = (255, 0, 0)  # Red
         self.field_border_color = (0, 0, 0)  # Black
 
-        self.tractor_img = pygame.image.load('continuousEnv/PPO/tractor.png')
+        self.coverage_20_flag = False
+        self.coverage_40_flag = False
+        self.coverage_60_flag = False
+        self.coverage_80_flag = False
+
+        self.tractor_img = pygame.image.load('/home/gast/Uzeyir/Reinforcement-Learning-for-Coverage-Path-Planning/continuousEnv/PPO/tractor.png')
         self.tractor_img = pygame.transform.scale(self.tractor_img, (self.cell_size * 30, self.cell_size * 30))
 
     def _calculate_grid_size(self, bounding_box_points):
@@ -69,7 +75,7 @@ class ContinuousPolygonCoverageEnv(gym.Env):
             [self.grid_width * self.cell_size, self.grid_height * self.cell_size], dtype=np.float32)
         normalized_angle = self.agent_angle / (2 * np.pi)
         return np.concatenate([normalized_position, [normalized_angle]], dtype=np.float32)
-
+                                
     def step(self, action):
         self.current_step += 1
 
@@ -87,35 +93,48 @@ class ContinuousPolygonCoverageEnv(gym.Env):
             [np.cos(self.agent_angle) * throttle, np.sin(self.agent_angle) * throttle], dtype=np.float32)
         new_position = self._clamp_position_to_bounds(new_position)
 
-        reward = 0
-
         if self._is_inside_polygon(new_position):
             self.agent_position = new_position
 
             cell_x, cell_y = self._get_grid_cell(self.agent_position)
             if not self.visited_grid[cell_x, cell_y]:
-                reward = 10
+                self.reward = 10
                 self.visited_grid[cell_x, cell_y] = True
             else:
-                reward = -1
+                self.reward = -6
                 self.overlap_count += 1
         else:
-            self.agent_position = new_position
-            reward = -1
+            self.reward = -1
 
         self.path.append(tuple(self.agent_position))
 
         coverage = self.calculate_coverage()
         if coverage >= self.coverage_threshold:
-            reward += 20
-            print("Coverage threshold reached")
+            self.reward += 20
+            print("Threshold reached")
             terminated = True
+            truncated = self.current_step >= self.max_steps
+            return self._normalize_observation(), self.reward, terminated, truncated, {}
         else:
             terminated = False
 
+        if coverage >= 0.2 and self.coverage_20_flag == False:
+            self.reward += 10
+            self.coverage_20_flag = True
+        if coverage >= 0.4 and self.coverage_40_flag == False:
+            self.reward += 10
+            self.coverage_40_flag = True
+        if coverage >= 0.60 and self.coverage_60_flag == False:
+            self.reward += 10
+            self.coverage_60_flag = True
+        if coverage >= 0.80 and self.coverage_80_flag == False:
+            self.reward += 10
+            self.coverage_80_flag = True
+
         truncated = self.current_step >= self.max_steps
 
-        return self._normalize_observation(), reward, terminated, truncated, {}
+        return self._normalize_observation(), self.reward, terminated, truncated, {}
+
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -125,6 +144,12 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.visited_grid = np.zeros((self.grid_width, self.grid_height), dtype=bool)
         self.path = [tuple(self.agent_position)]
         self.overlap_count = 0
+
+        self.coverage_20_flag = False
+        self.coverage_40_flag = False
+        self.coverage_60_flag = False
+        self.coverage_80_flag = False
+
         return self._normalize_observation(), {}
 
     def _get_observation(self):
@@ -134,7 +159,18 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         return self.field_polygon.contains(Point(point))
 
     def calculate_coverage(self):
-        return np.sum(self.visited_grid) / self.visited_grid.size
+        polygon_mask = np.zeros((self.grid_width, self.grid_height), dtype=bool)
+        for i in range(self.grid_width):
+            for j in range(self.grid_height):
+                cell_center = (i * self.cell_size + self.cell_size / 2, j * self.cell_size + self.cell_size / 2)
+                if self.field_polygon.contains(Point(cell_center)):
+                    polygon_mask[i, j] = True
+
+        total_cells_in_polygon = np.sum(polygon_mask)
+
+        visited_cells_in_polygon = np.sum(self.visited_grid & polygon_mask)
+
+        return visited_cells_in_polygon / total_cells_in_polygon
 
     def render(self):
         if self.render_mode is None:
@@ -191,7 +227,7 @@ if __name__ == '__main__':
     model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./continuousEnv/PPO/ppo_tensorboard/", learning_rate=0.0003)
 
     checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./continuousEnv/PPO/logs/', name_prefix='ppo_model')
-    total_timesteps = 5000000
+    total_timesteps = 1000000
     model.learn(total_timesteps=total_timesteps, callback=[checkpoint_callback])
 
     model.save("ppo_final_model")

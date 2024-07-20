@@ -14,7 +14,7 @@ from stable_baselines3.common.noise import NormalActionNoise
 class ContinuousPolygonCoverageEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
-    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=300, coverage_threshold=0.90,
+    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=100, coverage_threshold=0.90,
                  render_mode=None):
         super(ContinuousPolygonCoverageEnv, self).__init__()
         # Field consists of 36 cells
@@ -117,25 +117,23 @@ class ContinuousPolygonCoverageEnv(gym.Env):
             self.reward += 20
             print("Threshold reached")
             terminated = True
+            truncated = self.current_step >= self.max_steps
+            return self._normalize_observation(), self.reward, terminated, truncated, {}
         else:
             terminated = False
 
         if coverage >= 0.2 and self.coverage_20_flag == False:
             self.reward += 15
             self.coverage_20_flag = True
-            print("20% coverage reached")
         if coverage >= 0.4 and self.coverage_40_flag == False:
             self.reward += 15
             self.coverage_40_flag = True
-            print("40% coverage reached")
         if coverage >= 0.60 and self.coverage_60_flag == False:
             self.reward += 15
             self.coverage_60_flag = True
-            print("60% coverage reached")
         if coverage >= 0.80 and self.coverage_80_flag == False:
             self.reward += 15
             self.coverage_80_flag = True
-            print("80% coverage reached")
 
         truncated = self.current_step >= self.max_steps
 

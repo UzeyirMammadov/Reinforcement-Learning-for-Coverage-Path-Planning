@@ -13,7 +13,7 @@ from stable_baselines3.common.monitor import Monitor
 class ContinuousPolygonCoverageEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
-    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=250, coverage_threshold=0.95,
+    def __init__(self, field_points, bounding_box_points, cell_size=1, max_steps=100, coverage_threshold=0.90,
                  render_mode=None):
         super(ContinuousPolygonCoverageEnv, self).__init__()
         self.field_polygon = Polygon(field_points)
@@ -23,6 +23,7 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.current_step = 0
         self.coverage_threshold = coverage_threshold
         self.render_mode = render_mode
+        self.reward = 0
 
         self.action_space = spaces.Box(low=np.array([-1, -1, -1]), high=np.array([1, 1, 1]), dtype=np.float32)
         self.observation_space = spaces.Box(low=0, high=1, shape=(3,), dtype=np.float32)
@@ -92,20 +93,18 @@ class ContinuousPolygonCoverageEnv(gym.Env):
             [np.cos(self.agent_angle) * throttle, np.sin(self.agent_angle) * throttle], dtype=np.float32)
         new_position = self._clamp_position_to_bounds(new_position)
 
-        reward = 0
-
         if self._is_inside_polygon(new_position):
             self.agent_position = new_position
 
             cell_x, cell_y = self._get_grid_cell(self.agent_position)
             if not self.visited_grid[cell_x, cell_y]:
-                reward = 10
+                self.reward = 10
                 self.visited_grid[cell_x, cell_y] = True
             else:
-                reward = -1
+                self.reward = -6
                 self.overlap_count += 1
         else:
-            reward = -1
+            self.reward = -1
 
         self.path.append(tuple(self.agent_position))
 
@@ -114,29 +113,27 @@ class ContinuousPolygonCoverageEnv(gym.Env):
             self.reward += 20
             print("Threshold reached")
             terminated = True
+            truncated = self.current_step >= self.max_steps
+            return self._normalize_observation(), self.reward, terminated, truncated, {}
         else:
             terminated = False
 
         if coverage >= 0.2 and self.coverage_20_flag == False:
-            self.reward += 15
+            self.reward += 10
             self.coverage_20_flag = True
-            print("20% coverage reached")
         if coverage >= 0.4 and self.coverage_40_flag == False:
-            self.reward += 15
+            self.reward += 10
             self.coverage_40_flag = True
-            print("40% coverage reached")
         if coverage >= 0.60 and self.coverage_60_flag == False:
-            self.reward += 15
+            self.reward += 10
             self.coverage_60_flag = True
-            print("60% coverage reached")
         if coverage >= 0.80 and self.coverage_80_flag == False:
-            self.reward += 15
+            self.reward += 10
             self.coverage_80_flag = True
-            print("80% coverage reached")
 
         truncated = self.current_step >= self.max_steps
 
-        return self._normalize_observation(), reward, terminated, truncated, {}
+        return self._normalize_observation(), self.reward, terminated, truncated, {}
 
 
     def reset(self, seed=None, options=None):
@@ -162,7 +159,18 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         return self.field_polygon.contains(Point(point))
 
     def calculate_coverage(self):
-        return np.sum(self.visited_grid) / self.visited_grid.size
+        polygon_mask = np.zeros((self.grid_width, self.grid_height), dtype=bool)
+        for i in range(self.grid_width):
+            for j in range(self.grid_height):
+                cell_center = (i * self.cell_size + self.cell_size / 2, j * self.cell_size + self.cell_size / 2)
+                if self.field_polygon.contains(Point(cell_center)):
+                    polygon_mask[i, j] = True
+
+        total_cells_in_polygon = np.sum(polygon_mask)
+
+        visited_cells_in_polygon = np.sum(self.visited_grid & polygon_mask)
+
+        return visited_cells_in_polygon / total_cells_in_polygon
 
     def render(self):
         if self.render_mode is None:
@@ -216,7 +224,7 @@ if __name__ == '__main__':
     env = Monitor(env)
     check_env(env, warn=True)
 
-    model = A2C("MlpPolicy", env, verbose=1, tensorboard_log="./continuousEnv/A2C/a2c_tensorboard/", learning_rate=0.0007)
+    model = A2C("MlpPolicy", env, verbose=1, tensorboard_log="./continuousEnv/A2C/a2c_tensorboard/", learning_rate=0.0003)
 
     checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./continuousEnv/A2C/logs/', name_prefix='a2c_model')
     total_timesteps = 1000000
