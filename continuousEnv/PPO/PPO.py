@@ -30,7 +30,7 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.action_space = spaces.Box(low=np.array([-1, -1, -1]), high=np.array([1, 1, 1]), dtype=np.float32)
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.grid_resolution * self.grid_resolution + 4,), dtype=np.float32)
 
-        self.agent_position = np.array([0.5, 0.5], dtype=np.float32)  # Adjusted for smaller environment
+        self.agent_position = np.array([0.7, 0.7], dtype=np.float32)
         self.agent_angle = 0.0
         self.path = []
 
@@ -51,25 +51,27 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         self.tractor_color = (0, 0, 255)  # Blue
         self.tractor_border_color = (0, 0, 0)  # Black
 
-        self.coverage_20_flag = False
-        self.coverage_40_flag = False
-        self.coverage_60_flag = False
-        self.coverage_80_flag = False
-
     def _create_valid_grid_cells(self):
         valid_cells = []
         minx, miny, maxx, maxy = self.field_polygon.bounds
+
+        cells_to_exclude = [(1, 6), (6, 1), (5, 6), (6, 5)]
+
         x = minx
-        while x + self.cell_size <= maxx:
+        while x < maxx:
             y = miny
-            while y + self.cell_size <= maxy:
+            while y < maxy:
                 cell = box(x, y, x + self.cell_size, y + self.cell_size)
-                if self.field_polygon.contains(cell):
+                if self.field_polygon.intersects(cell):
                     cell_x = int((x - minx) / self.cell_size)
                     cell_y = int((y - miny) / self.cell_size)
-                    valid_cells.append((cell_x, cell_y))
+
+                    if (cell_x, cell_y) not in cells_to_exclude:
+                        valid_cells.append((cell_x, cell_y))
+
                 y += self.cell_size
             x += self.cell_size
+
         return valid_cells
 
     def _get_grid_cells(self, position, width):
@@ -80,7 +82,7 @@ class ContinuousPolygonCoverageEnv(gym.Env):
             for dy in np.arange(-half_width, half_width, self.cell_size):
                 cell_x = int((x + dx) // self.cell_size)
                 cell_y = int((y + dy) // self.cell_size)
-                if (cell_x, cell_y) in self.valid_grid_cells:  # Only add valid grid cells
+                if (cell_x, cell_y) in self.valid_grid_cells:
                     cells.append((cell_x, cell_y))
         return cells
 
@@ -146,7 +148,7 @@ class ContinuousPolygonCoverageEnv(gym.Env):
             print("80%")
 
         if coverage >= self.coverage_threshold:
-            self.reward += 10
+            self.reward += 20
             print("Threshold reached")
             terminated = True
             truncated = self.current_step >= self.max_steps
@@ -160,17 +162,17 @@ class ContinuousPolygonCoverageEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.agent_position = np.array([0.5, 0.5], dtype=np.float32)
+        self.agent_position = np.array([0.7, 0.7], dtype=np.float32)
         self.agent_angle = 0.0
         self.current_step = 0
         self.visited_grid = np.zeros((self.grid_width, self.grid_height), dtype=bool)
         self.path = [tuple(self.agent_position)]
         self.overlap_count = 0
 
-        self.coverage_20_flag = False
-        self.coverage_40_flag = False
-        self.coverage_60_flag = False
-        self.coverage_80_flag = False
+        initial_cells = self._get_grid_cells(self.agent_position, self.tractor_width)
+        for cell_x, cell_y in initial_cells:
+            if 0 <= cell_x < self.grid_width and 0 <= cell_y < self.grid_height:
+                self.visited_grid[cell_x, cell_y] = True
 
         return self._normalize_observation(), {}
 
@@ -181,70 +183,87 @@ class ContinuousPolygonCoverageEnv(gym.Env):
         visited_cells_in_polygon = sum(self.visited_grid[cell_x, cell_y] for cell_x, cell_y in self.valid_grid_cells)
         return visited_cells_in_polygon / len(self.valid_grid_cells)
 
-    def render(self):
-        if self.render_mode is None:
-            return
+    # def render(self):
+    #     if self.render_mode is None:
+    #         return
 
-        if self.screen is None:
-            pygame.init()
-            x_coords, y_coords = zip(*self.bounding_box.exterior.coords)
-            width = int((max(x_coords) - min(x_coords)) * self.scale_factor)
-            height = int((max(y_coords) - min(y_coords)) * self.scale_factor)
-            self.screen = pygame.display.set_mode((width, height))
-            pygame.display.set_caption('Polygon Coverage Env')
+    #     if self.screen is None:
+    #         pygame.init()
+    #         x_coords, y_coords = zip(*self.bounding_box.exterior.coords)
+    #         width = int((max(x_coords) - min(x_coords)) * self.scale_factor)
+    #         height = int((max(y_coords) - min(y_coords)) * self.scale_factor)
+    #         self.screen = pygame.display.set_mode((width, height))
+    #         pygame.display.set_caption('Polygon Coverage Env')
 
-        self.screen.fill(self.outside_color)
+    #     self.screen.fill(self.outside_color)
 
-        scaled_field_points = [(int(x * self.scale_factor), int(y * self.scale_factor)) for x, y in
-                               self.field_polygon.exterior.coords]
-        pygame.draw.polygon(self.screen, self.field_color, scaled_field_points, 0)
+    #     scaled_field_points = [(int(x * self.scale_factor), int(y * self.scale_factor)) for x, y in
+    #                            self.field_polygon.exterior.coords]
+    #     pygame.draw.polygon(self.screen, self.field_color, scaled_field_points, 0)
 
-        for i in range(self.grid_width):
-            for j in range(self.grid_height):
-                cell_x = i * self.cell_size
-                cell_y = j * self.cell_size
-                if self.visited_grid[i, j]:
-                    pygame.draw.rect(self.screen, self.visited_color,
-                                     (int(cell_x * self.scale_factor), int(cell_y * self.scale_factor),
-                                      int(self.cell_size * self.scale_factor), int(self.cell_size * self.scale_factor)))
+    #     field_points = list(self.field_polygon.exterior.coords)
+    #     minx, miny = field_points[0]
 
-        pygame.draw.polygon(self.screen, self.field_border_color, scaled_field_points, 1)
+    #     for cell_x, cell_y in self.valid_grid_cells:
+    #         rect = pygame.Rect(
+    #             int((minx + cell_x * self.cell_size) * self.scale_factor),
+    #             int((miny + cell_y * self.cell_size) * self.scale_factor),
+    #             int(self.cell_size * self.scale_factor),
+    #             int(self.cell_size * self.scale_factor)
+    #         )
+    #         pygame.draw.rect(self.screen, (255, 255, 0), rect) 
 
-        if len(self.path) > 1:
-            scaled_path_points = [(int(x * self.scale_factor), int(y * self.scale_factor)) for x, y in self.path]
-            pygame.draw.lines(self.screen, (0, 0, 0), False, scaled_path_points, 2)
+    #     for i in range(self.grid_width):
+    #         for j in range(self.grid_height):
+    #             cell_x = minx + i * self.cell_size
+    #             cell_y = miny + j * self.cell_size
+    #             rect = pygame.Rect(
+    #                 int(cell_x * self.scale_factor),
+    #                 int(cell_y * self.scale_factor),
+    #                 int(self.cell_size * self.scale_factor),
+    #                 int(self.cell_size * self.scale_factor)
+    #             )
+    #             if self.visited_grid[i, j]:
+    #                 pygame.draw.rect(self.screen, self.visited_color, rect)
+    #             pygame.draw.rect(self.screen, (0, 0, 0), rect, 1) 
 
-        tractor_width = self.tractor_width * self.scale_factor
-        tractor_length = self.cell_size * self.scale_factor * 1.5
-        center_x = int(self.agent_position[0] * self.scale_factor)
-        center_y = int(self.agent_position[1] * self.scale_factor)
+    #     pygame.draw.polygon(self.screen, self.field_border_color, scaled_field_points, 1)
 
-        tractor_surface = pygame.Surface((tractor_length, tractor_width), pygame.SRCALPHA)
-        tractor_surface.fill(self.tractor_color)
-        pygame.draw.rect(tractor_surface, self.tractor_border_color, tractor_surface.get_rect(), 1)
+    #     if len(self.path) > 1:
+    #         scaled_path_points = [(int(x * self.scale_factor), int(y * self.scale_factor)) for x, y in self.path]
+    #         pygame.draw.lines(self.screen, (0, 0, 0), False, scaled_path_points, 2)
 
-        rotated_surface = pygame.transform.rotate(tractor_surface, -np.degrees(self.agent_angle))
+    #     tractor_width = self.tractor_width * self.scale_factor
+    #     tractor_length = self.tractor_width * self.scale_factor
+    #     center_x = int(self.agent_position[0] * self.scale_factor)
+    #     center_y = int(self.agent_position[1] * self.scale_factor)
 
-        rect = rotated_surface.get_rect(center=(center_x, center_y))
+    #     tractor_surface = pygame.Surface((tractor_length, tractor_width), pygame.SRCALPHA)
+    #     tractor_surface.fill(self.tractor_color)
+    #     pygame.draw.rect(tractor_surface, self.tractor_border_color, tractor_surface.get_rect(), 1)
 
-        self.screen.blit(rotated_surface, rect.topleft)
+    #     rotated_surface = pygame.transform.rotate(tractor_surface, -np.degrees(self.agent_angle))
 
-        pygame.display.flip()
-        self.clock.tick(self.metadata["render_fps"])
+    #     rect = rotated_surface.get_rect(center=(center_x, center_y))
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.close()
+    #     self.screen.blit(rotated_surface, rect.topleft)
 
-    def close(self):
-        if self.screen is not None:
-            pygame.quit()
-            self.screen = None
+    #     pygame.display.flip()
+    #     self.clock.tick(self.metadata["render_fps"])
+
+    #     for event in pygame.event.get():
+    #         if event.type == pygame.QUIT:
+    #             self.close()
+
+    # def close(self):
+    #     if self.screen is not None:
+    #         pygame.quit()
+    #         self.screen = None
 
 
 if __name__ == '__main__':
     scale_factor = 0.5
-    tractor_width= 0.5
+    tractor_width= 0.6
     field_points = [(1 * scale_factor, 1 * scale_factor), 
                     (6 * scale_factor, 1 * scale_factor), 
                     (8 * scale_factor, 5 * scale_factor), 
@@ -273,11 +292,11 @@ if __name__ == '__main__':
                 learning_rate=0.0003,
                 clip_range=0.1,
                 vf_coef=0.3,
-                max_grad_norm=0.5,
+                max_grad_norm=0.53,
                 normalize_advantage=True)
 
     checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./continuousEnv/PPO/logs/', name_prefix='ppo_model')
-    total_timesteps = 3000000
+    total_timesteps = 3500000
     model.learn(total_timesteps=total_timesteps, callback=[checkpoint_callback])
 
     model.save("continuousEnv/PPO/ppo_final_model")
