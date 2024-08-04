@@ -12,7 +12,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 class ContinuousPolygonCoverageEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array'], 'render_fps': 30}
 
-    def __init__(self, field_points, bounding_box_points, grid_resolution=10, max_steps=100, coverage_threshold=1,
+    def __init__(self, field_points, bounding_box_points, grid_resolution=10, max_steps=100, coverage_threshold=0.9,
                  render_mode=None, tractor_width=None, scale_factor=None):
         super(ContinuousPolygonCoverageEnv, self).__init__()
         self.field_polygon = Polygon(field_points)
